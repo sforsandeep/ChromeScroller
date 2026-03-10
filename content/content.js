@@ -1,7 +1,7 @@
 // ChromeScroller — content script
 // Injection guard: version string prevents double-setup AND ensures a fresh
 // injection after an extension reload always runs (old version ≠ new version).
-const _CS_VER = 'v10';
+const _CS_VER = 'v11';
 if (window.__chromescrollerInjected !== _CS_VER) {
   window.__chromescrollerInjected = _CS_VER;
 
@@ -117,7 +117,13 @@ if (window.__chromescrollerInjected !== _CS_VER) {
     'chromescroller-highlight',
     'chromescroller-spinner',
     'chromescroller-flash',
+    'chromescroller-hide-headers-css',
   ]);
+
+  // Data attribute used to hide headers via a stylesheet rule.
+  // React never removes unknown data-* attributes during reconciliation, and a
+  // CSS !important rule beats any non-!important inline style React writes back.
+  const HIDE_ATTR = 'data-chromescroller-hide';
 
   function onMouseMove(e) {
     mouseX = e.clientX;
@@ -346,23 +352,42 @@ if (window.__chromescrollerInjected !== _CS_VER) {
     return [...found];
   }
 
-  // Set display:none on every detected header (removes it from layout so it
-  // cannot cover content rows in screenshots and scrollHeight shrinks correctly).
-  // Returns a save-list for restoreHeaders().
+  // Hide every detected header by:
+  //   1. Injecting a <style> rule  [data-chromescroller-hide] { display:none !important }
+  //   2. Setting the data attribute on each node
+  //
+  // Why not inline style?  React SPA reconciliation fires on scroll events and
+  // calls node.style.display = 'flex' (a JS property assignment) which removes
+  // any !important flag set via setProperty, overriding our inline hide.
+  // A stylesheet rule with !important is NOT overridden by non-!important inline
+  // styles, and React never removes unknown data-* attributes, so this approach
+  // survives re-renders.
+  //
+  // Returns { nodes, styleEl } for restoreHeaders().
   function hideHeaders(el, captureRect) {
-    return findHeaderElements(el, captureRect).map(node => {
-      const saved = node.style.display;
-      node.style.setProperty('display', 'none', 'important');
-      return { node, saved };
-    });
+    const nodes = findHeaderElements(el, captureRect);
+    if (nodes.length === 0) return { nodes: [], styleEl: null };
+
+    // Remove any leftover style element from a previous (failed) capture
+    const existing = document.getElementById('chromescroller-hide-headers-css');
+    if (existing) existing.remove();
+
+    const styleEl = document.createElement('style');
+    styleEl.id = 'chromescroller-hide-headers-css';
+    styleEl.textContent = `[${HIDE_ATTR}]{display:none!important}`;
+    document.head.appendChild(styleEl);
+
+    nodes.forEach(n => n.setAttribute(HIDE_ATTR, ''));
+    return { nodes, styleEl };
   }
 
-  // Undo hideHeaders() — restore each element's original display value.
-  function restoreHeaders(savedList) {
-    savedList.forEach(({ node, saved }) => {
-      if (saved) node.style.display = saved;
-      else node.style.removeProperty('display');
-    });
+  // Undo hideHeaders() — remove the attribute and the injected stylesheet.
+  function restoreHeaders({ nodes, styleEl }) {
+    nodes.forEach(n => n.removeAttribute(HIDE_ATTR));
+    if (styleEl && styleEl.parentNode) styleEl.remove();
+    // Belt-and-suspenders: also remove by id in case the ref was lost
+    const leftover = document.getElementById('chromescroller-hide-headers-css');
+    if (leftover) leftover.remove();
   }
 
   // ── Unified scroll-stitch engine ─────────────────────────────────────────
