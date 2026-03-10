@@ -131,7 +131,112 @@ if (!window.__chromescrollerInjected) {
       }
     }
   }
-  function onClick(e)     { /* commit 5 */ }
+  async function onClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentTarget || !isActive) return;
+
+    const el = currentTarget;
+    const spinner = showSpinner();
+
+    try {
+      const dataUrl = isScrollable(el)
+        ? await captureScrollableAndStitch(el)   // commit 6
+        : await captureVisible(el);
+
+      const filename = buildFilename();
+      await sendMessage({ action: 'DOWNLOAD_IMAGE', dataUrl, filename });
+    } catch (err) {
+      console.error('[ChromeScroller] Capture error:', err);
+    } finally {
+      hideSpinner(spinner);
+    }
+  }
+
+  // ── Spinner (busy state during capture) ──────────────────────────────────
+  function showSpinner() {
+    // Hide cursor + overlay so they don't appear in the screenshot
+    if (cursorStyleEl) cursorStyleEl.disabled = true;
+    if (highlightEl)   highlightEl.style.display = 'none';
+
+    const spinner = document.createElement('div');
+    spinner.id = 'chromescroller-spinner';
+    spinner.innerHTML = `
+      <div class="chromescroller-spinner-inner">
+        <div class="chromescroller-spinner-ring"></div>
+        <span>Capturing...</span>
+      </div>
+    `;
+    document.body.appendChild(spinner);
+    return spinner;
+  }
+
+  function hideSpinner(spinner) {
+    if (spinner && spinner.parentNode) spinner.remove();
+    if (cursorStyleEl) cursorStyleEl.disabled = false;
+    if (highlightEl && currentTarget) highlightEl.style.display = 'block';
+  }
+
+  // ── Screenshot helpers ───────────────────────────────────────────────────
+  async function captureVisible(el) {
+    const rect = el.getBoundingClientRect();
+    const dpr  = window.devicePixelRatio;
+    const resp = await sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
+    if (!resp || !resp.ok) throw new Error(resp?.error || 'captureVisibleTab failed');
+    return cropToRect(resp.dataUrl, rect, dpr);
+  }
+
+  function cropToRect(dataUrl, rect, dpr) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const w = Math.round(rect.width  * dpr);
+        const h = Math.round(rect.height * dpr);
+        if (w === 0 || h === 0) { reject(new Error('Zero-size element')); return; }
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(
+          img,
+          Math.round(rect.left * dpr), Math.round(rect.top  * dpr), w, h,
+          0, 0, w, h
+        );
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject(new Error('Failed to load screenshot data'));
+      img.src = dataUrl;
+    });
+  }
+
+  // captureScrollableAndStitch added in commit 6
+  async function captureScrollableAndStitch(el) {
+    return captureVisible(el); // temporary fallback — replaced in commit 6
+  }
+
+  function buildFilename() {
+    const title = (document.title || 'screenshot')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_\-]/g, '')
+      .substring(0, 60) || 'screenshot';
+    const ts = new Date().toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '');  // "2026-03-10T14-30-00"
+    return `${title}_${ts}.png`;
+  }
+
+  // ── Messaging helper ─────────────────────────────────────────────────────
+  function sendMessage(msg) {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage(msg, resp => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+        } else {
+          resolve(resp);
+        }
+      });
+    });
+  }
 
   // ── Message listener ─────────────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
