@@ -144,46 +144,48 @@ if (!window.__chromescrollerInjected) {
     if (!currentTarget || !isActive) return;
 
     const el = currentTarget;
-    const spinner = showSpinner();
+
+    // Hide our UI elements so they NEVER appear in any screenshot
+    if (cursorStyleEl) cursorStyleEl.disabled = true;
+    if (highlightEl)   highlightEl.style.display = 'none';
 
     try {
-      const dataUrl = isScrollable(el)
+      const scrollable = isScrollable(el);
+      // For scrollable: badge is shown between captures (never during captureVisibleTab)
+      // For non-scrollable: single instant capture, no badge needed
+      const dataUrl = scrollable
         ? await captureScrollableAndStitch(el)
         : await captureVisible(el);
 
       const filename = buildFilename();
       const resp = await sendMessage({ action: 'DOWNLOAD_IMAGE', dataUrl, filename });
       if (resp && resp.ok) showFlash('Saved!');
+      else showFlash('Failed', true);
     } catch (err) {
       console.error('[ChromeScroller] Capture error:', err);
       showFlash('Failed', true);
     } finally {
-      hideSpinner(spinner);
+      hideBadge();
+      if (cursorStyleEl) cursorStyleEl.disabled = false;
+      if (highlightEl && currentTarget) highlightEl.style.display = 'block';
     }
   }
 
-  // ── Spinner (busy state during capture) ──────────────────────────────────
-  function showSpinner() {
-    // Hide cursor + overlay so they don't appear in the screenshot
-    if (cursorStyleEl) cursorStyleEl.disabled = true;
-    if (highlightEl)   highlightEl.style.display = 'none';
-
-    const spinner = document.createElement('div');
-    spinner.id = 'chromescroller-spinner';
-    spinner.innerHTML = `
-      <div class="chromescroller-spinner-inner">
-        <div class="chromescroller-spinner-ring"></div>
-        <span>Capturing...</span>
-      </div>
-    `;
-    document.body.appendChild(spinner);
-    return spinner;
+  // ── Progress badge (small corner widget — never shown during captureVisibleTab) ──
+  function showBadge(text) {
+    let badge = document.getElementById('chromescroller-badge');
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'chromescroller-badge';
+      badge.innerHTML = '<div class="badge-ring"></div><span></span>';
+      document.body.appendChild(badge);
+    }
+    badge.querySelector('span').textContent = text;
   }
 
-  function hideSpinner(spinner) {
-    if (spinner && spinner.parentNode) spinner.remove();
-    if (cursorStyleEl) cursorStyleEl.disabled = false;
-    if (highlightEl && currentTarget) highlightEl.style.display = 'block';
+  function hideBadge() {
+    const badge = document.getElementById('chromescroller-badge');
+    if (badge) badge.remove();
   }
 
   function showFlash(text, isError = false) {
@@ -246,19 +248,28 @@ if (!window.__chromescrollerInjected) {
   }
 
   // ── Scrollable full-height capture ───────────────────────────────────────
+  // Badge is HIDDEN before every captureVisibleTab call (clean screenshot),
+  // then shown during the rAF+sleep gap so the user sees progress feedback.
   async function captureScrollableAndStitch(el) {
-    const dpr          = window.devicePixelRatio;
+    const dpr           = window.devicePixelRatio;
     const origScrollTop = el.scrollTop;
-    const totalHeight  = el.scrollHeight;
-    const viewHeight   = el.clientHeight;
+    const totalHeight   = el.scrollHeight;
+    const viewHeight    = el.clientHeight;
+    const totalStrips   = Math.ceil(totalHeight / viewHeight);
 
     el.scrollTop = 0;
-    await sleep(100); // let paint settle before first capture
+    // Wait two animation frames + small buffer for the first scroll to paint
+    await waitForPaint();
+    await sleep(60);
 
     const strips = []; // [{ dataUrl, cssHeight }]
-    let scrolled = 0;
+    let scrolled  = 0;
+    let stripIdx  = 0;
 
     while (true) {
+      // ── Badge MUST be hidden before we capture ──────────────────────────
+      hideBadge();
+
       const rect      = el.getBoundingClientRect();
       const remaining = totalHeight - scrolled;
       const captureH  = Math.min(viewHeight, remaining);
@@ -269,17 +280,33 @@ if (!window.__chromescrollerInjected) {
       const stripRect = { left: rect.left, top: rect.top, width: rect.width, height: captureH };
       const strip     = await cropToRect(resp.dataUrl, stripRect, dpr);
       strips.push({ dataUrl: strip, cssHeight: captureH });
+      stripIdx++;
 
       if (scrolled + viewHeight >= totalHeight) break;
 
-      scrolled      = Math.min(scrolled + viewHeight, totalHeight - viewHeight);
-      el.scrollTop  = scrolled;
-      await sleep(150); // let paint settle before next capture
+      // Scroll to next position
+      scrolled     = Math.min(scrolled + viewHeight, totalHeight - viewHeight);
+      el.scrollTop = scrolled;
+
+      // Show badge AFTER scrolling, BEFORE next capture — it won't be in the screenshot
+      showBadge(`Capturing ${stripIdx + 1} / ${totalStrips}`);
+
+      // Wait for scroll to fully paint before next capture
+      await waitForPaint();
+      await sleep(60);
     }
 
-    el.scrollTop = origScrollTop; // restore original scroll position
+    el.scrollTop = origScrollTop; // restore scroll position
+    hideBadge();
 
     return stitchStrips(strips, el.getBoundingClientRect().width, totalHeight, dpr);
+  }
+
+  // Wait for two rAF ticks so the browser has painted the new scroll position
+  function waitForPaint() {
+    return new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
   }
 
   function stitchStrips(strips, widthCSS, totalHeightCSS, dpr) {
