@@ -20,12 +20,15 @@ if (!window.__chromescrollerInjected) {
   const CAMERA_CURSOR = `url("data:image/svg+xml;base64,${btoa(CAMERA_SVG)}") 16 16, crosshair`;
 
   // ── State ────────────────────────────────────────────────────────────────
-  let isActive      = false;
-  let currentTarget = null;
-  let mouseX        = 0;
-  let mouseY        = 0;
-  let highlightEl   = null;
-  let cursorStyleEl = null;
+  let isActive       = false;
+  let currentTarget  = null;
+  let mouseX         = 0;
+  let mouseY         = 0;
+  let highlightEl    = null;
+  let cursorStyleEl  = null;
+  // true after the user navigates via scroll wheel; prevents mousemove from
+  // immediately resetting currentTarget back to the deepest child element.
+  let userNavigated  = false;
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   function sleep(ms) {
@@ -33,6 +36,9 @@ if (!window.__chromescrollerInjected) {
   }
 
   function isScrollable(el) {
+    // Require a meaningful visible height so we never treat tiny internal
+    // wrapper elements (eg. 5px scroll containers) as full-height targets.
+    if (el.clientHeight < 100) return false;
     const style = window.getComputedStyle(el);
     const ov    = style.overflowY;
     return (ov === 'auto' || ov === 'scroll' || ov === 'overlay') &&
@@ -82,7 +88,8 @@ if (!window.__chromescrollerInjected) {
     document.removeEventListener('wheel',     onWheel,     { capture: true, passive: false });
     document.removeEventListener('click',     onClick,     true);
 
-    currentTarget = null;
+    currentTarget  = null;
+    userNavigated  = false;
   }
 
   // ── Highlight ────────────────────────────────────────────────────────────
@@ -112,6 +119,18 @@ if (!window.__chromescrollerInjected) {
     mouseX = e.clientX;
     mouseY = e.clientY;
 
+    // If the user navigated via scroll wheel, keep their selection as long as
+    // the cursor stays inside the highlighted element's bounding rect.
+    // Only revert to natural hover once they move the cursor outside it.
+    if (userNavigated && currentTarget) {
+      const rect = currentTarget.getBoundingClientRect();
+      if (mouseX >= rect.left && mouseX <= rect.right &&
+          mouseY >= rect.top  && mouseY <= rect.bottom) {
+        return; // still inside — honour manual selection
+      }
+      userNavigated = false; // left the element — resume natural hover
+    }
+
     // elementFromPoint passes through pointer-events:none overlay automatically
     const el = document.elementFromPoint(mouseX, mouseY);
     if (el && !OWN_IDS.has(el.id)) {
@@ -128,12 +147,14 @@ if (!window.__chromescrollerInjected) {
       // Scroll UP → parent element (stop at <body>)
       const parent = currentTarget.parentElement;
       if (parent && parent !== document.documentElement) {
+        userNavigated = true; // user manually went to ancestor — preserve it
         setHighlight(parent);
       }
     } else {
       // Scroll DOWN → deepest element at current cursor position
       const el = document.elementFromPoint(mouseX, mouseY);
       if (el && el !== highlightEl) {
+        userNavigated = false; // back to deepest = natural hover state
         setHighlight(el);
       }
     }
@@ -143,6 +164,7 @@ if (!window.__chromescrollerInjected) {
     e.stopPropagation();
     if (!currentTarget || !isActive) return;
 
+    userNavigated = false; // reset so next hover starts fresh
     const el = currentTarget;
 
     // Hide our UI elements so they NEVER appear in any screenshot
@@ -298,6 +320,10 @@ if (!window.__chromescrollerInjected) {
       await waitForPaint();
       await sleep(60);
       fixedH = detectFixedHeaderHeight(captureRect);
+      // Sanity: if detected header is ≥ 80 % of the view, the detection is
+      // almost certainly wrong (e.g. a full-width content pane tagged sticky).
+      // Ignore it so we never end up with contentH of just a few pixels.
+      if (fixedH >= viewHeight * 0.8) fixedH = 0;
       el.scrollTop = 0;
       await waitForPaint();
       await sleep(60);
