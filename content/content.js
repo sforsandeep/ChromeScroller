@@ -317,33 +317,29 @@ if (window.__chromescrollerInjected !== _CS_VER) {
     return true;
   }
 
-  // Find all fixed/sticky header elements that overlap the top of captureRect.
-  // position:fixed  → searched document-wide (they can live anywhere in the DOM)
-  // position:sticky → searched inside `el` only (must scroll with `el`)
+  // Find all fixed/sticky header elements that physically overlap the top of
+  // the capture area.  We search the ENTIRE document so we catch headers that
+  // live outside `el` (siblings, ancestors) as well as those inside it.
+  // The key test: the element's current r.top must be at or above
+  // captureRect.top + topVal + 10  — this excludes mid-content sticky section
+  // headers that are still in their natural (un-pinned) position further down.
   function findHeaderElements(el, captureRect) {
-    const elScroller = (el === document.documentElement || el === document.body)
-      ? PAGE_SCROLLER : el;
     const found = new Set();
 
     document.querySelectorAll('*').forEach(node => {
       if (!isTopOverlayCandidate(node, captureRect)) return;
-      if (window.getComputedStyle(node).position !== 'fixed') return;
-      const r = node.getBoundingClientRect();
-      if (r.top > captureRect.top + 5) return; // must be anchored at very top
-      found.add(node);
-    });
-
-    el.querySelectorAll('*').forEach(node => {
-      if (!isTopOverlayCandidate(node, captureRect)) return;
       const style = window.getComputedStyle(node);
-      if (style.position !== 'sticky') return;
-      if (getScrollContainer(node.parentElement) !== elScroller) return;
-      const topVal = parseFloat(style.top) || 0;
-      if (topVal < 0 || topVal > captureRect.height * 0.3) return;
+      const pos = style.position;
+      if (pos !== 'fixed' && pos !== 'sticky') return;
+
       const r = node.getBoundingClientRect();
-      // At scrollTop=0 a true top-sticky sits at captureRect.top+topVal (±10 px).
-      // Mid-content section headers are further down — exclude them.
+      // For fixed elements top is always at their declared position.
+      // For sticky elements at scrollTop=0 top equals their natural layout position.
+      // A sticky bar that genuinely lives at the TOP of the capture area will
+      // have r.top ≈ captureRect.top (possibly + its CSS `top` offset).
+      const topVal = pos === 'sticky' ? Math.max(0, parseFloat(style.top) || 0) : 0;
       if (r.top > captureRect.top + topVal + 10) return;
+
       found.add(node);
     });
 
