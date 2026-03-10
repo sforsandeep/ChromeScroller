@@ -209,9 +209,69 @@ if (!window.__chromescrollerInjected) {
     });
   }
 
-  // captureScrollableAndStitch added in commit 6
+  // ── Scrollable full-height capture ───────────────────────────────────────
   async function captureScrollableAndStitch(el) {
-    return captureVisible(el); // temporary fallback — replaced in commit 6
+    const dpr          = window.devicePixelRatio;
+    const origScrollTop = el.scrollTop;
+    const totalHeight  = el.scrollHeight;
+    const viewHeight   = el.clientHeight;
+
+    el.scrollTop = 0;
+    await sleep(100); // let paint settle before first capture
+
+    const strips = []; // [{ dataUrl, cssHeight }]
+    let scrolled = 0;
+
+    while (true) {
+      const rect      = el.getBoundingClientRect();
+      const remaining = totalHeight - scrolled;
+      const captureH  = Math.min(viewHeight, remaining);
+
+      const resp = await sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
+      if (!resp || !resp.ok) throw new Error(resp?.error || 'captureVisibleTab failed');
+
+      const stripRect = { left: rect.left, top: rect.top, width: rect.width, height: captureH };
+      const strip     = await cropToRect(resp.dataUrl, stripRect, dpr);
+      strips.push({ dataUrl: strip, cssHeight: captureH });
+
+      if (scrolled + viewHeight >= totalHeight) break;
+
+      scrolled      = Math.min(scrolled + viewHeight, totalHeight - viewHeight);
+      el.scrollTop  = scrolled;
+      await sleep(150); // let paint settle before next capture
+    }
+
+    el.scrollTop = origScrollTop; // restore original scroll position
+
+    return stitchStrips(strips, el.getBoundingClientRect().width, totalHeight, dpr);
+  }
+
+  function stitchStrips(strips, widthCSS, totalHeightCSS, dpr) {
+    return new Promise((resolve, reject) => {
+      let loaded = 0;
+      const imgs = new Array(strips.length);
+
+      strips.forEach((strip, i) => {
+        const img  = new Image();
+        img.onload = () => {
+          imgs[i] = img;
+          if (++loaded === strips.length) {
+            const canvas = document.createElement('canvas');
+            canvas.width  = Math.round(widthCSS * dpr);
+            canvas.height = Math.round(totalHeightCSS * dpr);
+            const ctx = canvas.getContext('2d');
+            let yOffset = 0;
+            strips.forEach((s, i) => {
+              ctx.drawImage(imgs[i], 0, yOffset);
+              yOffset += Math.round(s.cssHeight * dpr);
+            });
+            resolve(canvas.toDataURL('image/png'));
+          }
+        };
+        img.onerror = () => reject(new Error(`Failed to load strip ${i}`));
+        img.src = strip.dataUrl;
+      });
+    });
   }
 
   function buildFilename() {
