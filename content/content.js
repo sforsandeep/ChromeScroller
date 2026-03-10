@@ -112,7 +112,25 @@ if (!window.__chromescrollerInjected) {
     }
   }
 
-  function onWheel(e)     { /* commit 4 */ }
+  function onWheel(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentTarget) return;
+
+    if (e.deltaY < 0) {
+      // Scroll UP → parent element (stop at <body>)
+      const parent = currentTarget.parentElement;
+      if (parent && parent !== document.documentElement) {
+        setHighlight(parent);
+      }
+    } else {
+      // Scroll DOWN → deepest element at current cursor position
+      const el = document.elementFromPoint(mouseX, mouseY);
+      if (el && el !== highlightEl) {
+        setHighlight(el);
+      }
+    }
+  }
   function onClick(e)     { /* commit 5 */ }
 
   // ── Message listener ─────────────────────────────────────────────────────
