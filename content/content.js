@@ -279,8 +279,11 @@ if (!window.__chromescrollerInjected) {
   }
 
   // ── Header detection helpers ─────────────────────────────────────────────
-  // Returns the nearest scrollable ancestor of `node` (the element whose
-  // scrollTop drives `node`'s position).  html/body → document.documentElement.
+  // The page-level scroll element (document.body on Firefox, <html> on Chrome).
+  const PAGE_SCROLLER = document.scrollingElement || document.documentElement;
+
+  // Returns the nearest scrollable ancestor of `node`.
+  // html/body → PAGE_SCROLLER so comparisons work on both Chrome and Firefox.
   function getScrollContainer(node) {
     let n = node;
     while (n && n !== document.documentElement && n !== document.body) {
@@ -288,7 +291,28 @@ if (!window.__chromescrollerInjected) {
       if (ov === 'auto' || ov === 'scroll' || ov === 'overlay') return n;
       n = n.parentElement;
     }
-    return document.documentElement;
+    return PAGE_SCROLLER;
+  }
+
+  // Shared pre-filter: is this node a visible, wide element pinned near the
+  // top of the capture area?  Used by both fixed and sticky detection.
+  function isTopOverlayCandidate(node, captureRect) {
+    if (!node || OWN_IDS.has(node.id)) return false;
+    const style = window.getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const pos = style.position;
+    if (pos !== 'fixed' && pos !== 'sticky') return false;
+    const r = node.getBoundingClientRect();
+    if (r.width < 10 || r.height < 2) return false;
+    // Must overlap the capture rect vertically
+    if (r.bottom <= captureRect.top || r.top >= captureRect.bottom) return false;
+    // Must cross the horizontal centre of the capture area (excludes FABs /
+    // sidebars / narrow badges that are anchored to one side only)
+    const centerX = captureRect.left + captureRect.width / 2;
+    if (r.left > centerX || r.right < centerX) return false;
+    // Top edge must be in the upper 35 % of the capture height
+    if (r.top > captureRect.top + captureRect.height * 0.35) return false;
+    return true;
   }
 
   // Detect position:FIXED elements (page-level navbars/toolbars) that overlap
@@ -296,44 +320,38 @@ if (!window.__chromescrollerInjected) {
   function detectFixedHeaderHeight(captureRect) {
     let maxBottom = captureRect.top;
     document.querySelectorAll('*').forEach(node => {
-      if (OWN_IDS.has(node.id)) return;
+      if (!isTopOverlayCandidate(node, captureRect)) return;
       if (window.getComputedStyle(node).position !== 'fixed') return;
       const r = node.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) return;
+      // Must be anchored very close to the top of the capture area
       if (r.top > captureRect.top + 5) return;
-      if (r.bottom <= captureRect.top) return;
-      if (r.left > captureRect.left + 30) return;
-      if (r.right < captureRect.left + captureRect.width * 0.33) return;
       maxBottom = Math.max(maxBottom, r.bottom);
     });
     return Math.max(0, maxBottom - captureRect.top);
   }
 
-  // Detect position:STICKY elements inside `el` whose scroll container IS `el`
-  // and that pin at/near the top of `el`'s viewport (top ≤ 30% of view height).
+  // Detect position:STICKY elements inside `el` that pin at the top of `el`'s
+  // viewport when el.scrollTop > 0.
   //
-  // Why this works (unlike the old Phase-C approach):
-  //   We measure stickyH ONCE at scrollTop=0 and use it for ALL strips.
-  //   For strips n≥1, targetScroll = consumed − headerH > 0, so the sticky
-  //   element stays pinned for every strip — we never back-scroll below its
-  //   stick threshold.  The sticky bar appears only in strip 0 (naturally);
-  //   strips 1+ crop it out, exposing the content rows beneath it.
+  // Key insight: we measure stickyH ONCE at scrollTop=0, then use it for ALL
+  // strips.  For strips n≥1, targetScroll = consumed − headerH > 0, so the
+  // sticky element stays pinned — we never back-scroll below its threshold.
+  // The bar appears only in strip 0 (naturally); strips 1+ crop it out.
   function detectStickyHeaderHeight(el, captureRect) {
+    const elScroller = (el === document.documentElement || el === document.body)
+      ? PAGE_SCROLLER : el;
     let maxPinnedBottom = captureRect.top;
     el.querySelectorAll('*').forEach(node => {
-      if (OWN_IDS.has(node.id)) return;
-      const style = window.getComputedStyle(node);
-      if (style.position !== 'sticky') return;
-      // Only sticky elements whose scroll container is `el`
-      if (getScrollContainer(node.parentElement) !== el) return;
-      const topVal = parseFloat(style.top);
-      if (isNaN(topVal) || topVal < 0 || topVal > captureRect.height * 0.3) return;
+      if (!isTopOverlayCandidate(node, captureRect)) return;
+      if (window.getComputedStyle(node).position !== 'sticky') return;
+      // Only sticky elements whose scroll container IS el (not an inner pane)
+      if (getScrollContainer(node.parentElement) !== elScroller) return;
+      const topVal = parseFloat(window.getComputedStyle(node).top) || 0;
+      if (topVal < 0 || topVal > captureRect.height * 0.3) return;
       const r = node.getBoundingClientRect();
-      if (r.width < 10 || r.height < 2) return;
-      // Must span at least 1/4 of the capture width (exclude narrow sticky pills)
-      if ((r.right - r.left) < captureRect.width * 0.25) return;
-      // Must be visible within the capture rect
-      if (r.bottom <= captureRect.top || r.top >= captureRect.bottom) return;
+      // At scrollTop=0 a truly-top sticky element sits at captureRect.top + topVal.
+      // Mid-content section headers will be further down — exclude them.
+      if (r.top > captureRect.top + topVal + 10) return;
       // When pinned, bottom = captureRect.top + topVal + element height
       maxPinnedBottom = Math.max(maxPinnedBottom, captureRect.top + topVal + r.height);
     });
@@ -360,13 +378,15 @@ if (!window.__chromescrollerInjected) {
     const maxScroll  = Math.max(0, totalHeight - viewHeight);
 
     // Measure combined header height once (fixed + sticky-pinned).
+    // +2 px padding absorbs any subpixel rounding at the strip boundary.
+    const OVERLAY_PADDING = 2;
     const headerH = (() => {
       if (maxScroll <= 0) return 0;
       const fixedH  = detectFixedHeaderHeight(captureRect);
       const stickyH = detectStickyHeaderHeight(el, captureRect);
       const fh = Math.max(fixedH, stickyH);
-      // Sanity: if > 80 % of the view, detection almost certainly misfired.
-      return fh >= viewHeight * 0.8 ? 0 : fh;
+      if (fh >= viewHeight * 0.8) return 0; // sanity: detection misfired
+      return Math.min(viewHeight * 0.5, fh + OVERLAY_PADDING);
     })();
 
     const strips = [];
@@ -466,7 +486,7 @@ if (!window.__chromescrollerInjected) {
 
   // ── Full-page capture ────────────────────────────────────────────────────
   async function captureFullPage() {
-    const el = document.documentElement;
+    const el = document.scrollingElement || document.documentElement;
     return scrollAndStitch(
       el,
       { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight },
