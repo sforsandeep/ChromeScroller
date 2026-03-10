@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>ChromeScroller</title>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="../icons/icon48.png" alt="" class="logo">
+      <h1>ChromeScroller</h1>
+    </div>
+
+    <div class="status-row">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">Inactive</span>
+    </div>
+
+    <button id="toggleBtn" class="btn btn-start">Start Capture Mode</button>
+
+    <div class="hints">
+      <div class="hint-row"><span class="hint-key">Scroll ↑</span> Select parent element</div>
+      <div class="hint-row"><span class="hint-key">Scroll ↓</span> Zoom into element</div>
+      <div class="hint-row"><span class="hint-key">Click</span> Capture screenshot</div>
+      <div class="hint-row"><span class="hint-key hint-blue">Blue</span> = scrollable (full height)</div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

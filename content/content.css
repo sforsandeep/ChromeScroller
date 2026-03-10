@@ -1,0 +1,72 @@
+/* ChromeScroller — injected content styles */
+
+/* ---- Element highlight overlay ---- */
+#chromescroller-highlight {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  border-radius: 2px;
+  display: none;
+  transition:
+    top    50ms ease,
+    left   50ms ease,
+    width  50ms ease,
+    height 50ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+/* Normal element — yellow/amber */
+#chromescroller-highlight.mode-normal {
+  border: 2px solid #f59e0b;
+  background-color: rgba(251, 191, 36, 0.10);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35), inset 0 0 0 1px rgba(245, 158, 11, 0.15);
+}
+
+/* Scrollable element — blue */
+#chromescroller-highlight.mode-scrollable {
+  border: 2px solid #3b82f6;
+  background-color: rgba(59, 130, 246, 0.10);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), inset 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+/* ---- Capturing spinner overlay ---- */
+#chromescroller-spinner {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.40);
+  pointer-events: none;
+}
+
+.chromescroller-spinner-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: #0f1117;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 22px 30px;
+  color: #e2e8f0;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.02em;
+}
+
+.chromescroller-spinner-ring {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: #3b82f6;
+  animation: chromescroller-spin 0.75s linear infinite;
+}
+
+@keyframes chromescroller-spin {
+  to { transform: rotate(360deg); }
+}
