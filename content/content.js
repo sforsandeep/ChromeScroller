@@ -85,8 +85,33 @@ if (!window.__chromescrollerInjected) {
     currentTarget = null;
   }
 
-  // ── Event handlers (added in commits 3–4) ────────────────────────────────
-  function onMouseMove(e) { /* commit 3 */ }
+  // ── Highlight ────────────────────────────────────────────────────────────
+  function setHighlight(el) {
+    if (!el || !highlightEl) return;
+    currentTarget = el;
+
+    const rect = el.getBoundingClientRect();
+    highlightEl.style.top    = rect.top    + 'px';
+    highlightEl.style.left   = rect.left   + 'px';
+    highlightEl.style.width  = rect.width  + 'px';
+    highlightEl.style.height = rect.height + 'px';
+
+    highlightEl.className = isScrollable(el) ? 'mode-scrollable' : 'mode-normal';
+    highlightEl.style.display = 'block';
+  }
+
+  // ── Event handlers ───────────────────────────────────────────────────────
+  function onMouseMove(e) {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+
+    // elementFromPoint passes through pointer-events:none overlay automatically
+    const el = document.elementFromPoint(mouseX, mouseY);
+    if (el && el !== highlightEl) {
+      setHighlight(el);
+    }
+  }
+
   function onWheel(e)     { /* commit 4 */ }
   function onClick(e)     { /* commit 5 */ }
 
