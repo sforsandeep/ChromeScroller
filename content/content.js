@@ -247,59 +247,121 @@ if (!window.__chromescrollerInjected) {
     });
   }
 
-  // ── Scrollable full-height capture ───────────────────────────────────────
-  // Badge is HIDDEN before every captureVisibleTab call (clean screenshot),
-  // then shown during the rAF+sleep gap so the user sees progress feedback.
-  async function captureScrollableAndStitch(el) {
-    const dpr           = window.devicePixelRatio;
-    const origScrollTop = el.scrollTop;
-    const totalHeight   = el.scrollHeight;
-    const viewHeight    = el.clientHeight;
-    const totalStrips   = Math.ceil(totalHeight / viewHeight);
+  // ── Fixed header detection ───────────────────────────────────────────────
+  // Finds fixed/sticky elements anchored at the top of captureRect and returns
+  // their combined height in CSS px.  Called after scrolling a few px so that
+  // sticky elements have already activated.
+  function detectFixedHeaderHeight(captureRect) {
+    let maxBottom = captureRect.top;
+    document.querySelectorAll('*').forEach(node => {
+      if (OWN_IDS.has(node.id)) return;
+      const pos = window.getComputedStyle(node).position;
+      if (pos !== 'fixed' && pos !== 'sticky') return;
+      const r = node.getBoundingClientRect();
+      // Must span at least 40 % of capture width (rule out sidebars/FABs)
+      if (r.width < captureRect.width * 0.4 || r.height < 2) return;
+      // Must be anchored at (or very near) the top of the capture area
+      if (r.top > captureRect.top + 5) return;
+      // Must actually overlap the capture area
+      if (r.bottom <= captureRect.top) return;
+      maxBottom = Math.max(maxBottom, r.bottom);
+    });
+    return Math.max(0, maxBottom - captureRect.top);
+  }
 
-    el.scrollTop = 0;
-    // Wait two animation frames + small buffer for the first scroll to paint
-    await waitForPaint();
-    await sleep(60);
+  // ── Unified scroll-stitch engine ─────────────────────────────────────────
+  // Handles both scrollable sub-elements and full-page captures.
+  // Automatically detects and skips fixed/sticky headers so they appear only
+  // once (in the first strip) and are never repeated in subsequent strips.
+  //
+  // Coordinate model (all values are CSS px):
+  //   el.scrollTop = S  →  element content at S..S+viewHeight is visible
+  //   At viewport y = captureRect.top + dy : element content at S + dy
+  //
+  // Strip 0  (scrollTop = 0):
+  //   cropTop = captureRect.top, captureH = min(viewHeight, totalHeight)
+  //   Captures content  0 .. viewHeight  (header appears naturally at top)
+  //
+  // Strips n≥1  (scrollTop = n * contentH, clamped to maxScrollTop):
+  //   cropTop = captureRect.top + (consumed − actualScrollTop)
+  //   ≥ captureRect.top + fixedH  ← always skips the header
+  //   captureH = min(available viewport below cropTop, remaining content)
+  async function scrollAndStitch(el, captureRect, totalHeight, viewHeight) {
+    const dpr        = window.devicePixelRatio;
+    const origScroll = el.scrollTop;
+    const maxScroll  = totalHeight - viewHeight;
 
-    const strips = []; // [{ dataUrl, cssHeight }]
-    let scrolled  = 0;
-    let stripIdx  = 0;
-
-    while (true) {
-      // ── Badge MUST be hidden before we capture ──────────────────────────
-      hideBadge();
-
-      const rect      = el.getBoundingClientRect();
-      const remaining = totalHeight - scrolled;
-      const captureH  = Math.min(viewHeight, remaining);
-
-      const resp = await sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
-      if (!resp || !resp.ok) throw new Error(resp?.error || 'captureVisibleTab failed');
-
-      const stripRect = { left: rect.left, top: rect.top, width: rect.width, height: captureH };
-      const strip     = await cropToRect(resp.dataUrl, stripRect, dpr);
-      strips.push({ dataUrl: strip, cssHeight: captureH });
-      stripIdx++;
-
-      if (scrolled + viewHeight >= totalHeight) break;
-
-      // Scroll to next position
-      scrolled     = Math.min(scrolled + viewHeight, totalHeight - viewHeight);
-      el.scrollTop = scrolled;
-
-      // Show badge AFTER scrolling, BEFORE next capture — it won't be in the screenshot
-      showBadge(`Capturing ${stripIdx + 1} / ${totalStrips}`);
-
-      // Wait for scroll to fully paint before next capture
+    // Peek a few px so sticky elements activate, then measure header height
+    let fixedH = 0;
+    if (maxScroll > 0) {
+      el.scrollTop = Math.min(50, maxScroll);
+      await waitForPaint();
+      await sleep(60);
+      fixedH = detectFixedHeaderHeight(captureRect);
+      el.scrollTop = 0;
       await waitForPaint();
       await sleep(60);
     }
 
-    el.scrollTop = origScrollTop; // restore scroll position
+    const contentH   = Math.max(1, viewHeight - fixedH); // new content per scroll step
+    const totalStrips = maxScroll <= 0
+      ? 1
+      : 1 + Math.ceil((totalHeight - viewHeight) / contentH);
+
+    const strips = [];
+    let consumed = 0;
+    let stripIdx = 0;
+
+    while (consumed < totalHeight) {
+      // Badge MUST be hidden before every captureVisibleTab call
+      hideBadge();
+
+      const resp = await sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
+      if (!resp || !resp.ok) throw new Error(resp?.error || 'captureVisibleTab failed');
+
+      const actualScroll = el.scrollTop;
+      // cropTop: viewport y where "consumed" content starts
+      const cropTop    = captureRect.top + (consumed - actualScroll);
+      const maxCaptH   = viewHeight - (cropTop - captureRect.top);
+      const captureH   = Math.min(maxCaptH, totalHeight - consumed);
+
+      if (captureH <= 0) break;
+
+      const strip = await cropToRect(
+        resp.dataUrl,
+        { left: captureRect.left, top: cropTop, width: captureRect.width, height: captureH },
+        dpr
+      );
+      strips.push({ dataUrl: strip, cssHeight: captureH });
+      consumed += captureH;
+      stripIdx++;
+
+      if (consumed >= totalHeight) break;
+
+      // Advance scroll so that content at `consumed` appears just below the header
+      el.scrollTop = Math.min(stripIdx * contentH, maxScroll);
+
+      // Show badge in the gap between scroll and next capture
+      showBadge(`Capturing ${stripIdx + 1} / ${totalStrips}`);
+      await waitForPaint();
+      await sleep(60);
+    }
+
+    el.scrollTop = origScroll;
     hideBadge();
 
-    return stitchStrips(strips, el.getBoundingClientRect().width, totalHeight, dpr);
+    return stitchStrips(strips, captureRect.width, totalHeight, dpr);
+  }
+
+  // ── Scrollable element capture (thin wrapper) ─────────────────────────────
+  async function captureScrollableAndStitch(el) {
+    const rect = el.getBoundingClientRect();
+    return scrollAndStitch(
+      el,
+      { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+      el.scrollHeight,
+      el.clientHeight
+    );
   }
 
   // Wait for two rAF ticks so the browser has painted the new scroll position
@@ -335,6 +397,36 @@ if (!window.__chromescrollerInjected) {
         img.src = strip.dataUrl;
       });
     });
+  }
+
+  // ── Full-page capture ────────────────────────────────────────────────────
+  async function captureFullPage() {
+    const el = document.documentElement;
+    return scrollAndStitch(
+      el,
+      { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight },
+      el.scrollHeight,
+      window.innerHeight
+    );
+  }
+
+  async function captureFullPageAndDownload() {
+    if (cursorStyleEl) cursorStyleEl.disabled = true;
+    if (highlightEl)   highlightEl.style.display = 'none';
+    try {
+      const dataUrl  = await captureFullPage();
+      const filename = buildFilename();
+      const resp     = await sendMessage({ action: 'DOWNLOAD_IMAGE', dataUrl, filename });
+      if (resp && resp.ok) showFlash('Full page saved!');
+      else                 showFlash('Failed', true);
+    } catch (err) {
+      console.error('[ChromeScroller] Full page capture error:', err);
+      showFlash('Failed', true);
+    } finally {
+      hideBadge();
+      if (cursorStyleEl) cursorStyleEl.disabled = false;
+      if (highlightEl && isActive) highlightEl.style.display = 'block';
+    }
   }
 
   function buildFilename() {
@@ -375,6 +467,9 @@ if (!window.__chromescrollerInjected) {
       case 'GET_STATUS':
         sendResponse({ active: isActive });
         break;
+      case 'CAPTURE_FULL_PAGE':
+        captureFullPageAndDownload().then(() => sendResponse({ ok: true }));
+        return true; // keep channel open (async)
     }
     return false;
   });

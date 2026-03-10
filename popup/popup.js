@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  const btn        = document.getElementById('toggleBtn');
-  const statusDot  = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
+  const btn         = document.getElementById('toggleBtn');
+  const fullPageBtn = document.getElementById('fullPageBtn');
+  const statusDot   = document.getElementById('statusDot');
+  const statusText  = document.getElementById('statusText');
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -10,7 +11,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       tab.url.startsWith('chrome://') ||
       tab.url.startsWith('chrome-extension://') ||
       tab.url.startsWith('about:')) {
-    btn.disabled = true;
+    btn.disabled         = true;
+    fullPageBtn.disabled = true;
     statusText.textContent = 'Not available on this page';
     return;
   }
@@ -25,24 +27,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   updateUI(active);
-  btn.disabled = false;
+  btn.disabled         = false;
+  fullPageBtn.disabled = false;
+
+  // Helper: ensure content script is injected
+  async function ensureInjected() {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { action: 'GET_STATUS' });
+    } catch {
+      await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content/content.css'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/content.js'] });
+      await new Promise(r => setTimeout(r, 60));
+    }
+  }
+
+  fullPageBtn.addEventListener('click', async () => {
+    fullPageBtn.disabled = true;
+    try {
+      await ensureInjected();
+      await chrome.tabs.sendMessage(tab.id, { action: 'CAPTURE_FULL_PAGE' });
+    } catch (err) {
+      console.error('[ChromeScroller popup]', err);
+    }
+    window.close();
+  });
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
 
     try {
       if (!active) {
-        // Inject CSS first, then JS (JS sets up the message listener)
-        await chrome.scripting.insertCSS({
-          target: { tabId: tab.id },
-          files:  ['content/content.css']
-        });
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files:  ['content/content.js']
-        });
-        // Short pause so the injected listener is registered before we message
-        await new Promise(r => setTimeout(r, 60));
+        await ensureInjected();
         await chrome.tabs.sendMessage(tab.id, { action: 'ACTIVATE' });
         active = true;
       } else {
