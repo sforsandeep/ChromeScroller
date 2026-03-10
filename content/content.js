@@ -67,9 +67,10 @@ if (!window.__chromescrollerInjected) {
     highlightEl.id = 'chromescroller-highlight';
     document.body.appendChild(highlightEl);
 
-    document.addEventListener('mousemove', onMouseMove, true);
-    document.addEventListener('wheel',     onWheel,     { capture: true, passive: false });
-    document.addEventListener('click',     onClick,     true);
+    document.addEventListener('mousemove',    onMouseMove,    true);
+    document.addEventListener('wheel',        onWheel,        { capture: true, passive: false });
+    document.addEventListener('click',        onClick,        true);
+    document.addEventListener('contextmenu',  onContextMenu,  true);
   }
 
   function deactivate() {
@@ -84,9 +85,10 @@ if (!window.__chromescrollerInjected) {
     const spinner = document.getElementById('chromescroller-spinner');
     if (spinner) spinner.remove();
 
-    document.removeEventListener('mousemove', onMouseMove, true);
-    document.removeEventListener('wheel',     onWheel,     { capture: true, passive: false });
-    document.removeEventListener('click',     onClick,     true);
+    document.removeEventListener('mousemove',   onMouseMove,   true);
+    document.removeEventListener('wheel',       onWheel,       { capture: true, passive: false });
+    document.removeEventListener('click',       onClick,       true);
+    document.removeEventListener('contextmenu', onContextMenu, true);
 
     currentTarget  = null;
     userNavigated  = false;
@@ -159,6 +161,13 @@ if (!window.__chromescrollerInjected) {
       }
     }
   }
+  function onContextMenu(e) {
+    // Right-click = quick stop shortcut
+    e.preventDefault();
+    e.stopPropagation();
+    deactivate();
+  }
+
   async function onClick(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -293,69 +302,75 @@ if (!window.__chromescrollerInjected) {
 
   // ── Unified scroll-stitch engine ─────────────────────────────────────────
   // Handles both scrollable sub-elements and full-page captures.
-  // Automatically detects and skips fixed/sticky headers so they appear only
-  // once (in the first strip) and are never repeated in subsequent strips.
+  // Uses a dynamic two-phase approach per strip so that fixed/sticky headers
+  // are detected at the ACTUAL scroll position of each strip and never reuse
+  // a stale single measurement (which breaks when different section headers
+  // become active at different scroll depths).
   //
-  // Coordinate model (all values are CSS px):
-  //   el.scrollTop = S  →  element content at S..S+viewHeight is visible
-  //   At viewport y = captureRect.top + dy : element content at S + dy
+  // Per-strip algorithm (strips 1+):
+  //   Phase A  →  scrollTop = consumed         (put next content at viewport top)
+  //   Phase B  →  measure fixedH at this pos   (sticky elements now active)
+  //   Phase C  →  scrollTop = consumed - fixedH (slide header over already-captured area)
   //
-  // Strip 0  (scrollTop = 0):
-  //   cropTop = captureRect.top, captureH = min(viewHeight, totalHeight)
-  //   Captures content  0 .. viewHeight  (header appears naturally at top)
+  //   After Phase C, viewport shows:
+  //     captureRect.top            → content at  consumed - fixedH  (already in prev strip)
+  //     captureRect.top + fixedH   → content at  consumed           (first new pixel) ✓
   //
-  // Strips n≥1  (scrollTop = n * contentH, clamped to maxScrollTop):
-  //   cropTop = captureRect.top + (consumed − actualScrollTop)
-  //   ≥ captureRect.top + fixedH  ← always skips the header
-  //   captureH = min(available viewport below cropTop, remaining content)
+  // Scroll-clamping (last strip): browser won't scroll past maxScroll, so
+  //   Phase C is skipped and startOffset = consumed − actualScroll handles the gap.
   async function scrollAndStitch(el, captureRect, totalHeight, viewHeight) {
     const dpr        = window.devicePixelRatio;
     const origScroll = el.scrollTop;
-    const maxScroll  = totalHeight - viewHeight;
-
-    // Peek a few px so sticky elements activate, then measure header height
-    let fixedH = 0;
-    if (maxScroll > 0) {
-      el.scrollTop = Math.min(50, maxScroll);
-      await waitForPaint();
-      await sleep(60);
-      fixedH = detectFixedHeaderHeight(captureRect);
-      // Sanity: if detected header is ≥ 80 % of the view, the detection is
-      // almost certainly wrong (e.g. a full-width content pane tagged sticky).
-      // Ignore it so we never end up with contentH of just a few pixels.
-      if (fixedH >= viewHeight * 0.8) fixedH = 0;
-      el.scrollTop = 0;
-      await waitForPaint();
-      await sleep(60);
-    }
-
-    const contentH   = Math.max(1, viewHeight - fixedH); // new content per scroll step
-    const totalStrips = maxScroll <= 0
-      ? 1
-      : 1 + Math.ceil((totalHeight - viewHeight) / contentH);
+    const maxScroll  = Math.max(0, totalHeight - viewHeight);
 
     const strips = [];
     let consumed = 0;
     let stripIdx = 0;
 
     while (consumed < totalHeight) {
-      // Badge MUST be hidden before every captureVisibleTab call
+      // ── Phase A: put `consumed` at the viewport top ──────────────────────
+      el.scrollTop = Math.min(consumed, maxScroll);
+      await waitForPaint();
+      const scrollAfterA = el.scrollTop;
+      const clamped      = scrollAfterA < consumed; // browser hit the bottom limit
+
+      // ── Phase B: detect fixed/sticky header at this scroll position ──────
+      // Skip for strip 0 (header is at top naturally) and when clamped (we use
+      // whatever is visible to fill the last strip without artificial offset).
+      let fixedH = 0;
+      if (stripIdx > 0 && !clamped) {
+        fixedH = detectFixedHeaderHeight(captureRect);
+        // Sanity: a "header" taller than 80 % of the view is almost certainly
+        // a mis-classified full-width content panel — ignore it.
+        if (fixedH >= viewHeight * 0.8) fixedH = 0;
+      }
+
+      // ── Phase C: back off so the header covers already-captured content ──
+      if (fixedH > 0) {
+        el.scrollTop = scrollAfterA - fixedH;
+        await waitForPaint();
+      }
+
+      // ── Capture (badge MUST be hidden beforehand) ────────────────────────
       hideBadge();
+      await sleep(60);
 
       const resp = await sendMessage({ action: 'CAPTURE_VISIBLE_TAB' });
       if (!resp || !resp.ok) throw new Error(resp?.error || 'captureVisibleTab failed');
 
+      // startOffset = how many px from captureRect.top to skip
+      //   • Normal strips: = fixedH  (via Phase C, consumed − actualScroll = fixedH)
+      //   • Clamped strip: = consumed − maxScroll  (skip already-captured overlap)
       const actualScroll = el.scrollTop;
-      // cropTop: viewport y where "consumed" content starts
-      const cropTop    = captureRect.top + (consumed - actualScroll);
-      const maxCaptH   = viewHeight - (cropTop - captureRect.top);
-      const captureH   = Math.min(maxCaptH, totalHeight - consumed);
+      const startOffset  = consumed - actualScroll;
+      const captureH     = Math.min(viewHeight - startOffset, totalHeight - consumed);
 
       if (captureH <= 0) break;
 
       const strip = await cropToRect(
         resp.dataUrl,
-        { left: captureRect.left, top: cropTop, width: captureRect.width, height: captureH },
+        { left: captureRect.left, top: captureRect.top + startOffset,
+          width: captureRect.width, height: captureH },
         dpr
       );
       strips.push({ dataUrl: strip, cssHeight: captureH });
@@ -364,13 +379,7 @@ if (!window.__chromescrollerInjected) {
 
       if (consumed >= totalHeight) break;
 
-      // Advance scroll so that content at `consumed` appears just below the header
-      el.scrollTop = Math.min(stripIdx * contentH, maxScroll);
-
-      // Show badge in the gap between scroll and next capture
-      showBadge(`Capturing ${stripIdx + 1} / ${totalStrips}`);
-      await waitForPaint();
-      await sleep(60);
+      showBadge(`Capturing strip ${stripIdx + 1}…`);
     }
 
     el.scrollTop = origScroll;
