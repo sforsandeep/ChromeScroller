@@ -101,13 +101,20 @@ if (!window.__chromescrollerInjected) {
   }
 
   // ── Event handlers ───────────────────────────────────────────────────────
+  // IDs of our own injected elements to skip when highlighting
+  const OWN_IDS = new Set([
+    'chromescroller-highlight',
+    'chromescroller-spinner',
+    'chromescroller-flash',
+  ]);
+
   function onMouseMove(e) {
     mouseX = e.clientX;
     mouseY = e.clientY;
 
     // elementFromPoint passes through pointer-events:none overlay automatically
     const el = document.elementFromPoint(mouseX, mouseY);
-    if (el && el !== highlightEl) {
+    if (el && !OWN_IDS.has(el.id)) {
       setHighlight(el);
     }
   }
@@ -141,13 +148,15 @@ if (!window.__chromescrollerInjected) {
 
     try {
       const dataUrl = isScrollable(el)
-        ? await captureScrollableAndStitch(el)   // commit 6
+        ? await captureScrollableAndStitch(el)
         : await captureVisible(el);
 
       const filename = buildFilename();
-      await sendMessage({ action: 'DOWNLOAD_IMAGE', dataUrl, filename });
+      const resp = await sendMessage({ action: 'DOWNLOAD_IMAGE', dataUrl, filename });
+      if (resp && resp.ok) showFlash('Saved!');
     } catch (err) {
       console.error('[ChromeScroller] Capture error:', err);
+      showFlash('Failed', true);
     } finally {
       hideSpinner(spinner);
     }
@@ -175,6 +184,33 @@ if (!window.__chromescrollerInjected) {
     if (spinner && spinner.parentNode) spinner.remove();
     if (cursorStyleEl) cursorStyleEl.disabled = false;
     if (highlightEl && currentTarget) highlightEl.style.display = 'block';
+  }
+
+  function showFlash(text, isError = false) {
+    const flash = document.createElement('div');
+    flash.id = 'chromescroller-flash';
+    flash.textContent = isError ? `ChromeScroller: ${text}` : `ChromeScroller: ${text}`;
+    Object.assign(flash.style, {
+      position:        'fixed',
+      bottom:          '24px',
+      right:           '24px',
+      zIndex:          '2147483647',
+      background:      isError ? '#ef4444' : '#22c55e',
+      color:           '#fff',
+      fontFamily:      '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontSize:        '13px',
+      fontWeight:      '600',
+      padding:         '10px 18px',
+      borderRadius:    '8px',
+      boxShadow:       '0 4px 16px rgba(0,0,0,0.4)',
+      pointerEvents:   'none',
+      opacity:         '1',
+      transition:      'opacity 0.4s ease',
+    });
+    document.body.appendChild(flash);
+    // Fade out after 1.5 s, remove after 2 s
+    setTimeout(() => { flash.style.opacity = '0'; }, 1500);
+    setTimeout(() => { if (flash.parentNode) flash.remove(); }, 2000);
   }
 
   // ── Screenshot helpers ───────────────────────────────────────────────────
