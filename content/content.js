@@ -1,7 +1,9 @@
 // ChromeScroller — content script
-// Injection guard: prevents double-setup if script is injected more than once
-if (!window.__chromescrollerInjected) {
-  window.__chromescrollerInjected = true;
+// Injection guard: version string prevents double-setup AND ensures a fresh
+// injection after an extension reload always runs (old version ≠ new version).
+const _CS_VER = 'v10';
+if (window.__chromescrollerInjected !== _CS_VER) {
+  window.__chromescrollerInjected = _CS_VER;
 
   // ── Camera SVG cursor (32×32, hotspot at centre of lens: 16 16) ──────────
   const CAMERA_SVG = [

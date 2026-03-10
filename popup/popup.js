@@ -30,11 +30,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   btn.disabled         = false;
   fullPageBtn.disabled = false;
 
-  // Helper: ensure content script is injected
+  // Helper: ensure content script is injected (and up-to-date).
+  // After an extension reload the old script's Chrome context is invalidated,
+  // but window.__chromescrollerInjected is still set in the tab.  We must
+  // clear it before re-injecting so the new script doesn't skip its setup.
   async function ensureInjected() {
     try {
       await chrome.tabs.sendMessage(tab.id, { action: 'GET_STATUS' });
     } catch {
+      // Clear the injection guard so the fresh script always executes
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => { delete window.__chromescrollerInjected; }
+      });
       await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content/content.css'] });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/content.js'] });
       await new Promise(r => setTimeout(r, 60));
