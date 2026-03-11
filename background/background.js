@@ -10,6 +10,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'DOWNLOAD_IMAGE':
       downloadImage(msg.dataUrl, msg.filename, sendResponse);
       return true;
+
+    case 'PING':
+      // Content script pings before capture to ensure the service worker is
+      // awake.  Receiving this message keeps the SW alive for the capture cycle.
+      sendResponse({ ok: true });
+      return false;
   }
 });
 

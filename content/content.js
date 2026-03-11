@@ -1,7 +1,7 @@
 // ChromeScroller — content script
 // Injection guard: version string prevents double-setup AND ensures a fresh
 // injection after an extension reload always runs (old version ≠ new version).
-const _CS_VER = 'v12';
+const _CS_VER = 'v13';
 if (window.__chromescrollerInjected !== _CS_VER) {
   window.__chromescrollerInjected = _CS_VER;
 
@@ -183,6 +183,12 @@ if (window.__chromescrollerInjected !== _CS_VER) {
 
     userNavigated = false; // reset so next hover starts fresh
     const el = currentTarget;
+
+    // Wake the service worker BEFORE hiding the UI so the SW is guaranteed
+    // to be active when CAPTURE_VISIBLE_TAB arrives.  If the SW was dormant
+    // this round-trip (≤ 50 ms when awake, ≤ 300 ms when just woken) ensures
+    // the subsequent capture messages never hit the "receiving end" race.
+    await sendMessage({ action: 'PING' });
 
     // Hide our UI elements so they NEVER appear in any screenshot
     if (cursorStyleEl) cursorStyleEl.disabled = true;
@@ -554,11 +560,40 @@ if (window.__chromescrollerInjected !== _CS_VER) {
   }
 
   // ── Messaging helper ─────────────────────────────────────────────────────
-  function sendMessage(msg) {
+  // MV3 service workers are terminated after ~30 s of inactivity.  When the
+  // SW is dormant two failure modes can occur:
+  //
+  //   A) lastError = "Could not establish connection / receiving end does not
+  //      exist" — SW is mid-wake.  We retry once after 300 ms (by then it's
+  //      fully awake and the retry succeeds transparently).
+  //
+  //   B) The callback is never called at all (rare race condition while the SW
+  //      transitions states).  The 8-second timeout resolves the promise with
+  //      an error so onClick always reaches the catch/finally block and shows
+  //      the "Failed" flash instead of hanging silently.
+  function sendMessage(msg, _canRetry = true) {
     return new Promise(resolve => {
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: false, error: 'Service worker did not respond — please try again' });
+      }, 8000);
+
       chrome.runtime.sendMessage(msg, resp => {
+        if (settled) return;
+        clearTimeout(timer);
+        settled = true;
+
         if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          const err = chrome.runtime.lastError.message || '';
+          // Retry once if the SW was still waking up
+          if (_canRetry && /receiving end|could not establish/i.test(err)) {
+            setTimeout(() => sendMessage(msg, false).then(resolve), 300);
+          } else {
+            resolve({ ok: false, error: err });
+          }
         } else {
           resolve(resp);
         }
