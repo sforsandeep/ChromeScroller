@@ -1,0 +1,22 @@
+# Build output
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor directories
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Node (if tooling is ever added)
+node_modules/
+npm-debug.log*
+
+# Python (icon generator)
+__pycache__/
+*.pyc
+tools/__pycache__/
