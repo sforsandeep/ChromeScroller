@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChromeScroller — Privacy Policy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f9fafb;
+      color: #111827;
+      line-height: 1.7;
+      padding: 48px 24px;
+    }
+
+    .card {
+      max-width: 720px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 24px rgba(0,0,0,.05);
+      padding: 48px 56px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .logo svg { flex-shrink: 0; }
+
+    .logo-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #111827;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: #6b7280;
+      margin-bottom: 40px;
+    }
+
+    h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #111827;
+      margin: 32px 0 10px;
+    }
+
+    p { color: #374151; margin-bottom: 12px; }
+
+    ul {
+      color: #374151;
+      padding-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    ul li { margin-bottom: 6px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #ecfdf5;
+      color: #065f46;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 999px;
+      margin-bottom: 32px;
+    }
+
+    .badge svg { flex-shrink: 0; }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.82rem;
+      color: #9ca3af;
+    }
+
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .card { padding: 32px 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="logo">
+      <!-- Camera icon -->
+      <svg width="36" height="36" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="8" width="28" height="19" rx="3" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+        <rect x="11" y="5" width="10" height="5" rx="2" fill="#1a1a1a" stroke="#fff" stroke-width="1.5"/>
+        <circle cx="16" cy="17" r="7" fill="none" stroke="#fff" stroke-width="1.5"/>
+        <circle cx="16" cy="17" r="5" fill="rgba(100,180,255,0.35)" stroke="#aaddff" stroke-width="1"/>
+        <circle cx="13.5" cy="14.5" r="1.2" fill="rgba(255,255,255,0.7)"/>
+        <circle cx="26" cy="10" r="2" fill="#cc3333" stroke="#fff" stroke-width="1"/>
+      </svg>
+      <span class="logo-text">ChromeScroller</span>
+    </div>
+
+    <h1>Privacy Policy</h1>
+    <p class="subtitle">Last updated: March 2026</p>
+
+    <div class="badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      No data collected · No servers · 100% local
+    </div>
+
+    <h2>Overview</h2>
+    <p>
+      ChromeScroller is a browser extension that lets you inspect, highlight, and screenshot
+      any DOM element on a web page — including full-height scroll-stitch captures of scrollable
+      containers. It operates entirely within your local browser and does not collect, store,
+      or transmit any data to any server or third party.
+    </p>
+
+    <h2>Data we do NOT collect</h2>
+    <p>ChromeScroller does not collect, access, store, or share any of the following:</p>
+    <ul>
+      <li>Personally identifiable information (name, email, address, etc.)</li>
+      <li>Browsing history or visited URLs</li>
+      <li>Page content, text, or HTML from any website you visit</li>
+      <li>Screenshots or captured images — these are saved directly to <em>your</em> device only</li>
+      <li>Mouse position, click data, or any user activity logs</li>
+      <li>Authentication credentials, cookies, or session tokens</li>
+      <li>Device information, IP address, or location</li>
+    </ul>
+
+    <h2>How the extension works</h2>
+    <p>
+      When you activate ChromeScroller, it injects a content script into the active tab.
+      This script listens for mouse movement and scroll-wheel input to let you navigate and
+      select elements on the page. When you click an element:
+    </p>
+    <ul>
+      <li>The browser takes a screenshot of the visible tab area using Chrome's built-in <code>captureVisibleTab</code> API.</li>
+      <li>If the element is scrollable, the extension scrolls through it and stitches multiple strips into one full-height image — entirely in memory, in your browser.</li>
+      <li>The final PNG is saved to your local <strong>Downloads</strong> folder using Chrome's downloads API.</li>
+    </ul>
+    <p>
+      No screenshot data, no page content, and no user information is ever sent outside
+      your device. The extension has no backend, no cloud storage, and no analytics.
+    </p>
+
+    <h2>Permissions used</h2>
+    <ul>
+      <li><strong>activeTab</strong> — to inspect the page DOM and measure element dimensions</li>
+      <li><strong>scripting</strong> — to inject the capture tool when you activate the extension</li>
+      <li><strong>downloads</strong> — to save the screenshot PNG to your Downloads folder</li>
+      <li><strong>tabs</strong> — to call <code>captureVisibleTab()</code> for taking the browser screenshot</li>
+    </ul>
+
+    <h2>Third-party services</h2>
+    <p>
+      ChromeScroller does not use any third-party analytics, crash reporting, advertising,
+      or data-processing services. No data is shared with any third party under any circumstances.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If this privacy policy changes, the updated version will be published at this URL
+      with a revised "Last updated" date. Continued use of the extension after any changes
+      constitutes acceptance of the updated policy.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions about this privacy policy can be directed to the developer via the
+      <a href="https://github.com/sforsandeep/ChromeScroller" target="_blank" rel="noopener">
+        ChromeScroller GitHub repository</a>.
+    </p>
+
+    <footer>
+      ChromeScroller is open source and free to use. &nbsp;·&nbsp;
+      <a href="https://github.com/sforsandeep/ChromeScroller" target="_blank" rel="noopener">View on GitHub</a>
+    </footer>
+
+  </div>
+</body>
+</html>
