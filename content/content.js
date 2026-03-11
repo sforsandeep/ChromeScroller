@@ -1,7 +1,7 @@
 // ChromeScroller — content script
 // Injection guard: version string prevents double-setup AND ensures a fresh
 // injection after an extension reload always runs (old version ≠ new version).
-const _CS_VER = 'v11';
+const _CS_VER = 'v12';
 if (window.__chromescrollerInjected !== _CS_VER) {
   window.__chromescrollerInjected = _CS_VER;
 
@@ -323,12 +323,22 @@ if (window.__chromescrollerInjected !== _CS_VER) {
     return true;
   }
 
-  // Find all fixed/sticky header elements that physically overlap the top of
-  // the capture area.  We search the ENTIRE document so we catch headers that
-  // live outside `el` (siblings, ancestors) as well as those inside it.
-  // The key test: the element's current r.top must be at or above
-  // captureRect.top + topVal + 10  — this excludes mid-content sticky section
-  // headers that are still in their natural (un-pinned) position further down.
+  // Find all fixed/sticky header elements that will overlay the top of the
+  // capture area during scrolling.  Search the ENTIRE document so we catch
+  // headers that live outside `el` (siblings, ancestors) as well as inside.
+  //
+  // Two separate rules for position:fixed vs position:sticky —
+  //
+  //   fixed  → r.top must already be at/near captureRect.top (they never move).
+  //
+  //   sticky → DON'T require the element to be stuck right now.  At scrollTop=0
+  //            the sticky bar sits in its natural layout position (e.g. 90px
+  //            below captureRect.top, behind the path-row and files-header).
+  //            It only sticks when the user has scrolled past those elements.
+  //            We detect it by its CSS `top` value: if it sticks within the top
+  //            10% of the capture area (or ≤ 60px absolute), it's a header bar.
+  //            isTopOverlayCandidate's 35%-from-top guard still excludes genuine
+  //            mid-content section headers that happen to have top:0.
   function findHeaderElements(el, captureRect) {
     const found = new Set();
 
@@ -339,12 +349,19 @@ if (window.__chromescrollerInjected !== _CS_VER) {
       if (pos !== 'fixed' && pos !== 'sticky') return;
 
       const r = node.getBoundingClientRect();
-      // For fixed elements top is always at their declared position.
-      // For sticky elements at scrollTop=0 top equals their natural layout position.
-      // A sticky bar that genuinely lives at the TOP of the capture area will
-      // have r.top ≈ captureRect.top (possibly + its CSS `top` offset).
-      const topVal = pos === 'sticky' ? Math.max(0, parseFloat(style.top) || 0) : 0;
-      if (r.top > captureRect.top + topVal + 10) return;
+
+      if (pos === 'fixed') {
+        // Fixed: always at its declared screen position — must be near top.
+        if (r.top > captureRect.top + 10) return;
+      } else {
+        // Sticky: may not be stuck yet (scrollTop could be 0).
+        // Accept if EITHER already pinned at the top OR its CSS `top` value is
+        // small (meaning it will pin near the top once the user has scrolled).
+        const stickyTop = Math.max(0, parseFloat(style.top) || 0);
+        const alreadyStuck  = r.top <= captureRect.top + stickyTop + 15;
+        const sticksNearTop = stickyTop <= Math.max(60, captureRect.height * 0.1);
+        if (!alreadyStuck && !sticksNearTop) return;
+      }
 
       found.add(node);
     });
